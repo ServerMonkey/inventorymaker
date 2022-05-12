@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# set correct gpg-agent settings
+mkdir -p "$HOME/.gnupg"
+echo "pinentry-program /usr/bin/pinentry-curses
+auto-expand-secmem
+max-cache-ttl 1800" >"$HOME/.gnupg/gpg-agent.conf" || exit 1
+
+# restart agent
+gpg-connect-agent reloadagent /bye || exit 1

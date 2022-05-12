@@ -1,0 +1,697 @@
+#!/usr/bin/env python3
+# coding=utf-8
+# PYTHON_ARGCOMPLETE_OK
+
+# PARSER LIBRARIES ############################################################
+
+# todo
+# import argparse
+# import argcomplete
+# import configparser
+import os
+import sys
+import subprocess
+import csv
+import random
+from faker import Faker
+import hashlib
+
+# NEVER RUN AS ROOT ###########################################################
+
+# todo: add -h --help args
+
+# args
+dir_src = ''
+try:
+    dir_src = str(sys.argv[1])
+except IndexError:
+    print('You need to specify an input directory')
+    exit(1)
+if not os.path.isdir(dir_src):
+    print("You need to specify an existing input directory, " +
+          "can't be a relative path")
+    exit(1)
+
+file_dest = ''
+try:
+    file_dest = str(sys.argv[2])
+except IndexError:
+    print('You need to specify an output file')
+    exit(1)
+if not file_dest.endswith('.ini'):
+    print("You need to specify an output file that ends in '.ini'")
+    exit(1)
+
+regenerate = ''
+try:
+    regenerate = str(sys.argv[3])
+except IndexError:
+    pass
+if regenerate == '-r':
+    # delete old inventory file
+    try:
+        os.remove(file_dest)
+    except FileNotFoundError:
+        pass
+
+# todo
+# PARSER INIT #################################################################
+
+# LIBRARIES ###################################################################
+
+# STATIC VARIABLES ############################################################
+path_home = os.path.expanduser("~")
+path_im = path_home + '/.inventorymaker'
+file_hash_cache = path_im + '/md5.cache'
+
+
+# FUNCTIONS ###################################################################
+
+def exit_fail():
+    # delete old inventory file
+    try:
+        os.remove(file_dest)
+    except FileNotFoundError:
+        pass
+
+    exit(1)
+
+
+def hash_make(file):
+    hash_md5 = hashlib.md5()
+    with open(file, "rb") as file_in:
+        for chunk in iter(lambda: file_in.read(4096), b""):
+            hash_md5.update(chunk)
+
+    return hash_md5.hexdigest()
+
+
+def hash_verify(file):
+    hash_md5 = hashlib.md5()
+    with open(file, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_md5.update(chunk)
+    return hash_md5.hexdigest()
+
+
+def check_for_new_inventory():
+    # read in old md5 cache
+    with open(file_hash_cache, "r") as file_in:
+        full_hash_old = file_in.read()
+
+    # iterate over files in that directory
+    files_group = os.listdir(dir_src)
+    full_hash = ''
+    for filename in files_group:
+        f = os.path.join(dir_src, filename)
+        # checking if it is a file
+        if os.path.isfile(f) and f.endswith('.csv'):
+            full_hash = full_hash + hash_make(f)
+
+    # exit if caches are the same
+    if full_hash_old == full_hash:
+        exit(0)
+
+    # create new cache
+    with open(file_hash_cache, "w") as file_out:
+        file_out.write(full_hash)
+
+
+def iterate_over_input_dir():
+    # iterate over files in that directory
+    files_group = os.listdir(dir_src)
+    files_group.sort()
+    for filename in files_group:
+        f = os.path.join(dir_src, filename)
+        # checking if it is a file
+        if os.path.isfile(f) and f.endswith('.csv'):
+            convert_csv_to_ini(f)
+
+    # add localhost
+    file_inventory = open(file_dest, 'a')
+    file_inventory.write('[local]\n')
+    file_inventory.write('localhost ansible_connection=local\n')
+    # close file
+    file_inventory.close()
+
+
+def csv_to_list(path_csv):
+    list_rows = []
+    header = ''
+    group_data = ''
+
+    # read CSV
+    with open(path_csv, newline='') as csvfile:
+        csv_invent = csv.reader(csvfile, delimiter=',', quotechar='|')
+        counter = 0
+        for csv_row in csv_invent:
+            counter = counter + 1
+
+            # first line must be header
+            if counter == 1:
+                header = csv_row
+            # second line must be group data
+            elif counter == 2:
+                group_data = csv_row
+            # add to data and skip empty rows
+            elif ''.join(csv_row) != '':
+                list_rows.append(csv_row)
+
+    return header, group_data, list_rows
+
+
+def random_hostname():
+    file_dict = '/usr/share/dict/words'
+    dictionary = open(file_dict).read().splitlines()
+
+    rnd_hostname = ''
+    # put together two random words
+    for i in range(2):
+        random_word = random.choice(dictionary)
+        random_word = random_word.lower()
+        filter_special = filter(str.isalpha, random_word)
+        random_word = ''.join(filter_special)
+        rnd_hostname = rnd_hostname + random_word
+
+    # return a maximum of 16 characters
+    return rnd_hostname[:16]
+
+
+def random_ip(ip_class=''):
+    faker = Faker()
+    # todo
+    # https://www.guru99.com/ip-address-classes.html
+    # Class A	1.0.0.1 to 126.255.255.254 (255.0.0.0) (net,host,host,host)
+    # Class B	128.1.0.1 to 191.255.255.254 (255.255.0.0) (net,net,host,host)
+    # Class C	192.0.1.1 to 223.255.254.254 (255.255.255.0) (net,net,net,host)
+    if ip_class == '':
+        fake_ip = faker.ipv4()
+    else:
+        fake_ip = faker.ipv4(address_class=ip_class)
+    return fake_ip
+
+
+def random_mac(nic_type=''):
+    args = ''
+    if nic_type == 'q':
+        args = '-q'
+    elif nic_type == 'x':
+        args = '-x'
+
+    mac = os.popen('randmac ' + args).read()
+    mac = mac.replace('\n', '')
+    return mac
+
+
+def error(code, cat, row_nr):
+    print('FORMAT ERROR: column ' + cat + ': ' + code + ', on row: ')
+    print('  ' + str(row_nr))
+    exit_fail()
+
+
+def sort_by_header(list_header, list_row):
+    list_header_categories = ['HOSTNAME',  # 0
+                              'CHILD',  # 1
+                              'NIC_CHILD',  # 2
+                              'IP',  # 3
+                              'FACTORY_IP',  # 4
+                              'MAC',  # 5
+                              'HARDWARE',  # 6
+                              'WIFI',  # 7
+                              'STATE',  # 8
+                              'OS',  # 9
+                              'DESCRIPTION',  # 10
+                              'ANSIBLE_HOST',  # 11
+                              'FACTORY_AUTH',  # 12
+                              'AUTH',  # 13
+                              'IPMI_HOST',  # 14
+                              'IPMI_AUTH',  # 15
+                              'HPILO_HOST',  # 16
+                              'HPILO_AUTH',  # 17
+                              'USER',  # 18
+                              'LOCATION',  # 19
+                              'PORT'  # 20
+                              ]
+
+    list_out = [''] * len(list_header_categories)
+    # todo
+    # list_extras_header = []
+    # list_extras = []
+
+    # get data from each individual item/cell in current row
+    cnt_cells = 0
+    for cell in list_row:
+        try:
+            cat = list_header[cnt_cells].lower()
+        except IndexError as err:
+            cat = ''
+            print(
+                'ERROR: ' + str(err) +
+                ' - There is probably a comma in your CSV ' +
+                'that is not a column seperator, remove it.')
+            exit_fail()
+
+        # assign data for each header category
+        cnt_header_cats = 0
+        for _ in list_header_categories:
+            if cat.upper() == list_header_categories[cnt_header_cats]:
+                list_out[cnt_header_cats] = cell
+            cnt_header_cats = cnt_header_cats + 1
+
+        # todo
+        # # add non standart headers
+        # if cell != '' and cat.upper() not in list_header_categories:
+        #     list_extras_header.append(cat)
+        #     list_extras.append(cell)
+
+        # cell counter
+        cnt_cells = cnt_cells + 1
+
+    return list_out
+
+
+def parse_im_script(row):
+    # HOSTNAME
+    if row[0].startswith('*'):
+        row[0] = random_hostname()
+
+    # IP
+    if row[3].startswith('*'):
+        if row[3] == '*':
+            row[3] = random_ip()
+        elif row[3] == '*A':
+            row[3] = random_ip('a')
+        elif row[3] == '*B':
+            row[3] = random_ip('b')
+        elif row[3] == '*C':
+            row[3] = random_ip('c')
+    elif row[3] != '':
+        if '.' not in row[3]:
+            error('Is not an IPv4 address', 'IP', row)
+
+    # MAC
+    if row[5].startswith('*'):
+        if row[5] == '*':
+            row[5] = random_mac()
+        # qemu VM
+        elif row[5] == '*Q':
+            row[5] = random_mac('q')
+        # xen VM
+        elif row[5] == '*X':
+            row[5] = random_mac('x')
+        # auto detect VM
+        if row[6] == '':
+            row[6] = 'VM'
+    elif row[5] != '':
+        if ':' not in row[5]:
+            error('Is not a MAC address', 'MAC', row)
+
+    # STATE
+    state_vars = ['UP', 'DOWN', 'MAN', 'MAINT', 'EXC', 'LIQ', 'UNKNOWN', '']
+    if row[8] not in state_vars:
+        error('Only use ' + ', '.join(state_vars) + 'or empty variable',
+              'STATE', row)
+        row[8] = 'UNKNOWN'
+
+    # OS
+    if row[9] == 'AUTO':
+        row[9] = 'generic'
+
+    # DESCRIPTION
+    if row[10] == 'AUTO':
+        row[9] = 'generic system'
+
+    # AUTH
+    if '$USER' in row[13]:
+        host_user = os.getlogin()
+        row[13] = row[13].replace('$USER', host_user)
+
+    return row
+
+
+def get_password(pass_path):
+    # get password from pass
+    pass_home = os.path.expanduser('~') + '/.password-store/ansible/'
+    pass_path_full = 'ansible/' + pass_path
+    cmd = 'pass show ' + pass_path_full
+    current_pass = ''
+
+    if not os.path.isfile(pass_home + pass_path + '.gpg'):
+        print('Password does not exist, using empty. Add with:')
+        print('pass insert ' + pass_path_full)
+        current_pass = ''
+        return current_pass
+
+    try:
+        current_pass = str(
+            subprocess.run(cmd, check=True, shell=True, text=True,
+                           capture_output=True).stdout)
+    except subprocess.CalledProcessError:
+        print('Aborting, pass decryption failed')
+        print('Command was: ' + cmd)
+        exit_fail()
+    except FileNotFoundError:
+        print('ERROR: pass is not installed')
+        exit_fail()
+
+    current_pass = current_pass.replace("\n", "")
+
+    return current_pass
+
+
+def gen_pass_tag(pass_or_user, pass_type, group, hostname):
+    # variables
+    # todo, remove odl vars?
+    # pass_home = '~/.password-store/ansible/'
+    # pass_pre = "\"{{ lookup('password','" + pass_home
+    # pass_suf = "') }}\""
+    pre_var = pass_type + '_password='
+
+    # add subgroup
+    sub_group = ''
+    if pass_type != 'ansible' and pass_type != 'ansible_become':
+        sub_group = '_' + pass_type
+
+    # for single host
+    if hostname:
+        if '/' in pass_or_user:
+            pass_path = pass_or_user
+        else:
+            pass_path = group + '/' + hostname + sub_group + '/' + pass_or_user
+
+        # get password from pass
+        current_pass = get_password(pass_path)
+        # old
+        # tag_pass = hostname + ' ' + pre_var + pass_pre + pass_path + pass_suf
+        tag_pass = hostname + ' ' + pre_var + current_pass
+    # for group
+    else:
+        if '/' in pass_or_user:
+            pass_path = pass_or_user
+        else:
+            pass_path = group + sub_group + '/' + pass_or_user
+
+        # get password from pass
+        current_pass = get_password(pass_path)
+        # old
+        # tag_pass = pre_var + pass_pre + pass_path + pass_suf
+        tag_pass = pre_var + current_pass
+
+    return tag_pass
+
+
+def convert_csv_to_ini(file_src):
+    # source data
+    csv_data = csv_to_list(file_src)
+    list_header = csv_data[0]
+    list_group_data = csv_data[1]
+    list_src = csv_data[2]
+
+    # create dest inventory database
+    list_dest = []
+    list_dest_vars = []
+    list_dest_child = []
+
+    # find current group
+    current_group = os.path.basename(file_src).replace('.csv', '')
+
+    # more variables
+    str_bec_su = 'ansible_become_method=su'
+    str_bec_sudo = 'ansible_become_method=sudo'
+    str_python = 'ansible_python_interpreter=auto_silent'
+    skip_states = ['EXC', 'DOWN']
+
+    # group data
+    data_group = sort_by_header(list_header, list_group_data)
+    data_group = parse_im_script(data_group)
+
+    # iterate over each entire row/cell
+    for row in list_src:
+        # get data by header categorie
+        data = sort_by_header(list_header, row)
+        data = parse_im_script(data)
+
+        # CHILD: host as child group alias
+        if data[1]:
+            list_dest_child.append(data[1])
+            # if there are other tags than CHILD tag
+            if ''.join(data) != data[1]:
+                error('Add to group or ' + data[1] + '.csv instead',
+                      'everything but CHILD', row)
+        # NIC_CHILD: host as NIC child
+        elif data[2]:
+            pass
+        # exclude
+        elif data[8] in skip_states or data_group[8] in skip_states:
+            pass
+        # HOSTNAME
+        elif data[0] and data[13] != 'LOCAL':
+            # HOSTNAME with IP
+            if data[3]:
+                tag_ip = 'ansible_host=' + data[3]
+                list_dest.append(data[0] + ' ' + tag_ip)
+            # HOSTNAME only
+            else:
+                list_dest.append(data[0])
+            # AUTH and USER
+            if data[13] or data[18]:
+                # always add
+                list_dest.append(data[0] + ' ' + str_python)
+                # use unprivileged user instead
+                if data[18]:
+                    user_name = data[18]
+                else:
+                    user_name = data[13]
+                # add user
+                list_dest.append(
+                    data[0] + ' ansible_user=' + os.path.basename(user_name))
+                list_dest.append(gen_pass_tag(user_name,
+                                              'ansible',
+                                              current_group,
+                                              data[0]))
+                # root does not need become
+                if user_name == 'root':
+                    pass
+                # unprivileged user
+                elif data[18]:
+                    list_dest.append(data[0] + ' ' + str_bec_su)
+                    list_dest.append(gen_pass_tag('root',
+                                                  'ansible_become',
+                                                  current_group,
+                                                  data[0]))
+                # user with sudo
+                elif data[13]:
+                    list_dest.append(data[0] + ' ' + str_bec_sudo)
+                    # become pass is required even if it is the same as user
+                    list_dest.append(gen_pass_tag(user_name,
+                                                  'ansible_become',
+                                                  current_group,
+                                                  data[0]))
+            # FACTORY IP
+            if data[4]:
+                list_dest.append(data[0] + ' im_factory_ip=' + data[4])
+            # MAC
+            if data[5]:
+                list_dest.append(data[0] + ' im_mac=' + data[5])
+            # HARDWARE
+            if data[6]:
+                list_dest.append(data[0] + ' im_hardware=' + data[6])
+            # WIFI
+            if data[7]:
+                list_dest.append(data[0] + ' im_wifi=' + data[5])
+            # STATE
+            if data[8]:
+                list_dest.append(data[0] + ' im_state=' + data[8])
+            # OS
+            if data[9]:
+                list_dest.append(data[0] + ' im_os=' + data[9])
+            # DESCRIPTION
+            if data[10]:
+                list_dest.append(
+                    data[0] + ' im_description=\"' + data[10] + '\"')
+            # ANSIBLE_HOST
+            if data[11]:
+                list_dest.append(data[0] + ' im_ansible_host=' + data[11])
+            # FACTORY_AUTH
+            if data[12]:
+                list_dest.append(data[0] + ' im_factory_auth=' + data[12])
+            # IPMI_HOST
+            if data[14]:
+                list_dest.append(data[0] + ' ipmi_host=\"' + data[14] + '\"')
+            # IPMI_AUTH
+            if data[15]:
+                list_dest.append(
+                    data[0] + ' ipmi_user=' + os.path.basename(data[15]))
+                list_dest.append(gen_pass_tag(data[15],
+                                              'ipmi',
+                                              current_group,
+                                              data[0]))
+            # HPILO_HOST
+            if data[16]:
+                list_dest.append(data[0] + ' hpilo_host=\"' + data[16] + '\"')
+            # HPILO_AUTH
+            if data[17]:
+                list_dest.append(
+                    data[0] + ' hpilo_user=' + os.path.basename(data[17]))
+                tag_hpilo_pass = gen_pass_tag(data[17],
+                                              'hpilo',
+                                              current_group,
+                                              data[0])
+                list_dest.append(tag_hpilo_pass)
+            # LOCATION
+            if data[19]:
+                list_dest.append(data[0] + ' im_location=' + data[19])
+            # PORT
+            if data[20]:
+                list_dest.append(data[0] + ' ansible_port=' + data[20])
+
+    # add for group
+    if data_group[13] != 'LOCAL' and data_group[8] not in skip_states:
+        # AUTH and USER
+        if data_group[13] or data_group[18]:
+            # always add
+            list_dest_vars.append(str_python)
+            # use unprivileged user instead
+            if data_group[18]:
+                user_name = data_group[18]
+            else:
+                user_name = data_group[13]
+            # add user
+            list_dest_vars.append(
+                'ansible_user=' + os.path.basename(user_name))
+            list_dest_vars.append(gen_pass_tag(user_name,
+                                               'ansible',
+                                               current_group,
+                                               ''))
+            # root does not need become
+            if user_name == 'root':
+                pass
+            # unprivileged user
+            elif data_group[18]:
+                list_dest_vars.append(str_bec_su)
+                list_dest_vars.append(gen_pass_tag('root',
+                                                   'ansible_become',
+                                                   current_group,
+                                                   ''))
+            # user with sudo
+            elif data_group[13]:
+                list_dest_vars.append(str_bec_sudo)
+                # become pass is required even if it is the same as user
+                list_dest_vars.append(gen_pass_tag(user_name,
+                                                   'ansible_become',
+                                                   current_group,
+                                                   data_group[0]))
+        # HARDWARE
+        if data_group[6]:
+            list_dest_vars.append('im_hardware=' + data_group[6])
+        # WIFI
+        if data_group[7]:
+            list_dest_vars.append('im_wifi=' + data_group[5])
+        # STATE
+        if data_group[8]:
+            list_dest_vars.append('im_state=' + data_group[8])
+        # OS
+        if data_group[9]:
+            list_dest_vars.append('im_os=' + data_group[9])
+        # DESCRIPTION
+        if data_group[10]:
+            list_dest_vars.append('im_description=\"' + data_group[10] + '\"')
+        # ANSIBLE_HOST
+        if data_group[11]:
+            list_dest_vars.append('im_ansible_host=' + data_group[11])
+        # FACTORY_AUTH
+        if data_group[12]:
+            list_dest_vars.append('im_factory_auth=' + data_group[12])
+        # IPMI_HOST
+        if data_group[14]:
+            list_dest_vars.append('ipmi_host=\"' + data_group[14] + '\"')
+        # IPMI_AUTH
+        if data_group[15]:
+            list_dest_vars.append(
+                'ipmi_user=' + os.path.basename(data_group[15]))
+            list_dest_vars.append(gen_pass_tag(data_group[15],
+                                               'ipmi',
+                                               current_group,
+                                               ''))
+        # HPILO_HOST
+        if data_group[16]:
+            list_dest_vars.append('hpilo_host=\"' + data_group[16] + '\"')
+        # HPILO_AUTH
+        if data_group[17]:
+            list_dest_vars.append(
+                'hpilo_user=' + os.path.basename(data_group[17]))
+            tag_hpilo_pass = gen_pass_tag(data_group[17],
+                                          'hpilo',
+                                          current_group,
+                                          '')
+            list_dest_vars.append(tag_hpilo_pass)
+        # LOCATION
+        if data_group[19]:
+            list_dest_vars.append('im_location=' + data_group[19])
+        # PORT
+        if data_group[20]:
+            list_dest_vars.append('ansible_port=' + data_group[20])
+
+    # write destination inventory file
+    file_inventory = open(file_dest, 'a')
+
+    # add ansible inventory
+    # hosts
+    # always add group, even when empty
+    list_dest.insert(0, '[' + current_group + ']')
+    for m in list_dest:
+        file_inventory.write(m + '\n')
+    file_inventory.write('\n')
+    # vars
+    if ''.join(list_dest_vars) != '':
+        list_dest_vars.insert(0, '[' + current_group + ':vars]')
+        for o in list_dest_vars:
+            file_inventory.write(o + '\n')
+        file_inventory.write('\n')
+    # children
+    if 'CHILD' in list_header:
+        list_dest_child.insert(0, '[' + current_group + ':children]')
+        for p in list_dest_child:
+            file_inventory.write(p + '\n')
+        file_inventory.write('\n')
+
+    # close file
+    file_inventory.close()
+
+
+def main():
+    # create config path
+    if not os.path.isdir(path_im):
+        os.makedirs(path_im)
+
+    # cleanup hash if there is no destination inventory
+    if not os.path.isfile(file_dest) or not os.path.isfile(file_hash_cache):
+        try:
+            with open(file_hash_cache, 'w') as f:
+                f.write('')
+        except FileNotFoundError:
+            pass
+
+    check_for_new_inventory()
+
+    # delete old inventory file
+    try:
+        os.remove(file_dest)
+    except FileNotFoundError:
+        pass
+
+    # generate new inventory
+    print("Generating inventory...")
+    iterate_over_input_dir()
+
+
+# MAIN ########################################################################
+
+main()
+# todo:
+# flags:
+# -l --live only updates MAINT variable to file_inventory
+# -u --update only updates RND fields that have no value
+# -f --fullupdate replaces every RND field with new random variables
+# -c --cleanup removes every RND assigned variable
+# -x --export export to ansible .ini file_inventory file
