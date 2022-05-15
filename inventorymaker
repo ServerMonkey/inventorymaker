@@ -118,6 +118,15 @@ def check_for_new_inventory():
 
 
 def iterate_over_input_dir():
+    # give correct permissions
+    os.umask(0)
+    with open(os.open(file_dest, os.O_CREAT | os.O_WRONLY, 0o600),
+              'w') as file_inventory:
+        # add localhost
+        file_inventory.write('[local]\n')
+        file_inventory.write('localhost ansible_connection=local\n')
+        file_inventory.write('\n')
+
     # iterate over files in that directory
     files_group = os.listdir(dir_src)
     files_group.sort()
@@ -127,10 +136,6 @@ def iterate_over_input_dir():
         if os.path.isfile(f) and f.endswith('.csv'):
             convert_csv_to_ini(f)
 
-    # add localhost
-    file_inventory = open(file_dest, 'a')
-    file_inventory.write('[local]\n')
-    file_inventory.write('localhost ansible_connection=local\n')
     # close file
     file_inventory.close()
 
@@ -337,8 +342,7 @@ def get_password(pass_path):
     current_pass = ''
 
     if not os.path.isfile(pass_home + pass_path + '.gpg'):
-        print('Password does not exist, using empty. Add with:')
-        print('pass insert ' + pass_path_full)
+        print('No password, add with:  pass insert ' + pass_path_full)
         current_pass = ''
         return current_pass
 

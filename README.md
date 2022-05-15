@@ -12,7 +12,7 @@ Create a GPG password and key for the current user:
 `gpg --full-gen-key`
 
 Then init pass tool with  
-`pass init`
+`pass init your.name@example.org`
 
 Correctly configure gpg-agent with  
 `inventorymaker-init`
