@@ -235,7 +235,8 @@ def sort_by_header(list_header, list_row):
                               'HPILO_AUTH',  # 17
                               'USER',  # 18
                               'LOCATION',  # 19
-                              'PORT'  # 20
+                              'PORT',  # 20
+                              'PYTHON'  # 21
                               ]
 
     list_out = [''] * len(list_header_categories)
@@ -422,7 +423,7 @@ def convert_csv_to_ini(file_src):
     # more variables
     str_bec_su = 'ansible_become_method=su'
     str_bec_sudo = 'ansible_become_method=sudo'
-    str_python = 'ansible_python_interpreter=auto_silent'
+    str_python = 'ansible_python_interpreter=auto_silent'  # todo
     skip_states = ['EXC', 'DOWN']
 
     # group data
@@ -460,7 +461,7 @@ def convert_csv_to_ini(file_src):
             # AUTH and USER
             if data[13] or data[18]:
                 # always add
-                list_dest.append(data[0] + ' ' + str_python)
+                # list_dest.append(data[0] + ' ' + str_python)  #todo
                 # use unprivileged user instead
                 if data[18]:
                     user_name = data[18]
@@ -548,13 +549,17 @@ def convert_csv_to_ini(file_src):
             # PORT
             if data[20]:
                 list_dest.append(data[0] + ' ansible_port=' + data[20])
+            # PYTHON
+            if data[21]:
+                list_dest.append(
+                    data[0] + ' ansible_python_interpreter=' + data[21])
 
     # add for group
     if data_group[13] != 'LOCAL' and data_group[8] not in skip_states:
         # AUTH and USER
         if data_group[13] or data_group[18]:
             # always add
-            list_dest_vars.append(str_python)
+            # list_dest_vars.append(str_python)  #todo
             # use unprivileged user instead
             if data_group[18]:
                 user_name = data_group[18]
@@ -635,6 +640,10 @@ def convert_csv_to_ini(file_src):
         # PORT
         if data_group[20]:
             list_dest_vars.append('ansible_port=' + data_group[20])
+        # PYTHON
+        if data_group[21]:
+            list_dest_vars.append(
+                'ansible_python_interpreter=' + data_group[21])
 
     # write destination inventory file
     file_inventory = open(file_dest, 'a')
