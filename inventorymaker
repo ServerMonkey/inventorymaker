@@ -63,6 +63,21 @@ if regenerate == '-r':
 path_home = os.path.expanduser("~")
 path_im = path_home + '/.inventorymaker'
 file_hash_cache = path_im + '/md5.cache'
+file_dest_json = file_dest.replace('.ini', '.json')
+dict_pass_cache = {}
+file_cfg_vmh = '/etc/vmh.conf'
+
+# LOAD CFG ####################################################################
+path_vmh_immutable = ""
+with open(file_cfg_vmh, "r") as cfg:
+    for line in cfg:
+        # get path to vmh immutable folder
+        if line.startswith('PATH_IMMUTABLE='):
+            path_vmh_immutable = line.rsplit('=')[1].rstrip('\n')
+
+if not os.path.isdir(path_vmh_immutable):
+    print("Failed to load PATH_IMMUTABLE from " + file_cfg_vmh)
+    exit(1)
 
 
 # FUNCTIONS ###################################################################
@@ -236,7 +251,9 @@ def sort_by_header(list_header, list_row):
                               'USER',  # 18
                               'LOCATION',  # 19
                               'PORT',  # 20
-                              'PYTHON'  # 21
+                              'PYTHON',  # 21
+                              'DNS',  # 22
+                              'ORDER'  # 23
                               ]
 
     list_out = [''] * len(list_header_categories)
@@ -336,35 +353,43 @@ def parse_im_script(row):
 
 
 def get_password(pass_path):
-    # get password from pass
-    pass_home = os.path.expanduser('~') + '/.password-store/ansible/'
-    pass_path_full = 'ansible/' + pass_path
-    cmd = 'pass show ' + pass_path_full
-    current_pass = ''
-
-    if not os.path.isfile(pass_home + pass_path + '.gpg'):
-        print('No password, add with:  pass insert ' + pass_path_full)
+    # reuse existing password
+    if pass_path in dict_pass_cache:
+        current_pass = dict_pass_cache.get(pass_path)
+    # get new password
+    else:
+        # get password from pass
+        pass_home = os.path.expanduser('~') + '/.password-store/ansible/'
+        pass_path_full = 'ansible/' + pass_path
+        cmd = 'pass show ' + pass_path_full
         current_pass = ''
-        return current_pass
 
-    try:
-        current_pass = str(
-            subprocess.run(cmd, check=True, shell=True, text=True,
-                           capture_output=True).stdout)
-    except subprocess.CalledProcessError:
-        print('Aborting, pass decryption failed')
-        print('Command was: ' + cmd)
-        exit_fail()
-    except FileNotFoundError:
-        print('ERROR: pass is not installed')
-        exit_fail()
+        if not os.path.isfile(pass_home + pass_path + '.gpg'):
+            print('No password, add with:  pass insert ' + pass_path_full)
+            current_pass = ''
+            return current_pass
 
-    current_pass = current_pass.replace("\n", "")
+        try:
+            current_pass = str(
+                subprocess.run(cmd, check=True, shell=True, text=True,
+                               capture_output=True).stdout)
+        except subprocess.CalledProcessError:
+            print('Aborting, pass decryption failed')
+            print('Command was: ' + cmd)
+            exit_fail()
+        except FileNotFoundError:
+            print('ERROR: pass is not installed')
+            exit_fail()
+
+        current_pass = current_pass.replace("\n", "")
+
+        # add password to dictionary
+        dict_pass_cache.update({pass_path: current_pass})
 
     return current_pass
 
 
-def gen_pass_tag(pass_or_user, pass_type, group, hostname):
+def gen_pass_tag(user, pass_type, group, hostname):
     # variables
     # todo, remove odl vars?
     # pass_home = '~/.password-store/ansible/'
@@ -379,10 +404,10 @@ def gen_pass_tag(pass_or_user, pass_type, group, hostname):
 
     # for single host
     if hostname:
-        if '/' in pass_or_user:
-            pass_path = pass_or_user
+        if '/' in user:
+            pass_path = user
         else:
-            pass_path = group + '/' + hostname + sub_group + '/' + pass_or_user
+            pass_path = group + '/' + hostname + sub_group + '/' + user
 
         # get password from pass
         current_pass = get_password(pass_path)
@@ -391,10 +416,10 @@ def gen_pass_tag(pass_or_user, pass_type, group, hostname):
         tag_pass = hostname + ' ' + pre_var + current_pass
     # for group
     else:
-        if '/' in pass_or_user:
-            pass_path = pass_or_user
+        if '/' in user:
+            pass_path = user
         else:
-            pass_path = group + sub_group + '/' + pass_or_user
+            pass_path = group + sub_group + '/' + user
 
         # get password from pass
         current_pass = get_password(pass_path)
@@ -416,6 +441,9 @@ def convert_csv_to_ini(file_src):
     list_dest = []
     list_dest_vars = []
     list_dest_child = []
+
+    # vmh environment
+    list_vmh = []
 
     # find current group
     current_group = os.path.basename(file_src).replace('.csv', '')
@@ -519,7 +547,12 @@ def convert_csv_to_ini(file_src):
                 list_dest.append(data[0] + ' im_ansible_host=' + data[11])
             # FACTORY_AUTH
             if data[12]:
-                list_dest.append(data[0] + ' im_factory_auth=' + data[12])
+                list_dest.append(
+                    data[0] + ' im_factory_user=' + os.path.basename(data[12]))
+                list_dest.append(gen_pass_tag(data[12],
+                                              'im_factory',
+                                              current_group,
+                                              data[0]))
             # IPMI_HOST
             if data[14]:
                 list_dest.append(data[0] + ' ipmi_host=\"' + data[14] + '\"')
@@ -553,6 +586,17 @@ def convert_csv_to_ini(file_src):
             if data[21]:
                 list_dest.append(
                     data[0] + ' ansible_python_interpreter=' + data[21])
+            # DNS
+            if data[22]:
+                list_dest.append(data[0] + ' im_dns=' + data[22])
+            # ORDER
+            if data[23]:
+                list_dest.append(data[0] + ' im_order=' + data[23])
+                # vmh data
+                # of OS
+                if data[9]:
+                    # order,hostname,os
+                    list_vmh.append(data[23] + "," + data[0] + "," + data[9])
 
     # add for group
     if data_group[13] != 'LOCAL' and data_group[8] not in skip_states:
@@ -644,6 +688,12 @@ def convert_csv_to_ini(file_src):
         if data_group[21]:
             list_dest_vars.append(
                 'ansible_python_interpreter=' + data_group[21])
+        # DNS
+        if data_group[22]:
+            list_dest_vars.append('im_dns=' + data_group[22])
+        # ORDER
+        if data_group[23]:
+            list_dest_vars.append('im_order=' + data_group[23])
 
     # write destination inventory file
     file_inventory = open(file_dest, 'a')
@@ -671,6 +721,18 @@ def convert_csv_to_ini(file_src):
     # close file
     file_inventory.close()
 
+    # write vmh environment file
+    # if list_vmh is not empty
+    if bool(list_vmh):
+        # sort by first number in natural order
+        list_vmh.sort(key=lambda x: '{0:0>8}'.format(x.rsplit(',')[0]).lower())
+        # add each line
+        file_vmh = path_vmh_immutable + '/' + current_group + '.csv'
+        file_vmh_open = open(file_vmh, 'a')
+        for q in list_vmh:
+            file_vmh_open.write(q + '\n')
+        file_vmh_open.close()
+
 
 def main():
     # create config path
@@ -693,6 +755,12 @@ def main():
     except FileNotFoundError:
         pass
 
+    # delete old vmh environments
+    files_vmh_env = os.listdir(path_vmh_immutable)
+    for file in files_vmh_env:
+        if file.endswith(".csv"):
+            os.remove(os.path.join(path_vmh_immutable, file))
+
     # generate new inventory
     print("Generating inventory...")
     iterate_over_input_dir()
@@ -701,7 +769,15 @@ def main():
 # MAIN ########################################################################
 
 main()
+
 # todo:
+# check if password file has changed.
+# if not simply reuse old password from inventory file
+# or create a password dictionary taht is encrypted:
+# https://stackoverflow.com/questions/182197/how-do-i-watch-a-file-for-changes
+#
+# also get passwords in paralell
+#
 # flags:
 # -l --live only updates MAINT variable to file_inventory
 # -u --update only updates RND fields that have no value
