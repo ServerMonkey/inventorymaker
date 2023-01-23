@@ -69,15 +69,20 @@ file_cfg_vmh = '/etc/vmh.conf'
 
 # LOAD CFG ####################################################################
 path_vmh_immutable = ""
-with open(file_cfg_vmh, "r") as cfg:
-    for line in cfg:
-        # get path to vmh immutable folder
-        if line.startswith('PATH_IMMUTABLE='):
-            path_vmh_immutable = line.rsplit('=')[1].rstrip('\n')
+try:
+    with open(file_cfg_vmh, "r") as cfg:
+        for line in cfg:
+            # get path to vmh immutable folder
+            if line.startswith('PATH_IMMUTABLE='):
+                path_vmh_immutable = line.rsplit('=')[1].rstrip('\n')
 
-if not os.path.isdir(path_vmh_immutable):
-    print("Failed to load PATH_IMMUTABLE from " + file_cfg_vmh)
-    exit(1)
+    if not os.path.isdir(path_vmh_immutable):
+        print("Failed to load PATH_IMMUTABLE from " + file_cfg_vmh)
+        exit(1)
+
+except FileNotFoundError:
+    # skip if vmh is not installed
+    pass
 
 
 # FUNCTIONS ###################################################################
@@ -449,6 +454,7 @@ def convert_csv_to_ini(file_src):
     current_group = os.path.basename(file_src).replace('.csv', '')
 
     # more variables
+    str_bec_false = 'ansible_become=false'
     str_bec_su = 'ansible_become_method=su'
     str_bec_sudo = 'ansible_become_method=sudo'
     str_python = 'ansible_python_interpreter=auto_silent'  # todo
@@ -505,10 +511,13 @@ def convert_csv_to_ini(file_src):
                 # root does not need become
                 if user_name == 'root':
                     pass
-                # unprivileged user
+                # force disable become for USER if AUTH is "FALSE"
+                elif data[13] == 'FALSE':
+                    list_dest.append(data[0] + ' ' + str_bec_false)
+                # unprivileged user, uses su and root password
                 elif data[18]:
                     list_dest.append(data[0] + ' ' + str_bec_su)
-                    list_dest.append(gen_pass_tag('root',
+                    list_dest.append(gen_pass_tag(data_group[13],
                                                   'ansible_become',
                                                   current_group,
                                                   data[0]))
@@ -619,10 +628,10 @@ def convert_csv_to_ini(file_src):
             # root does not need become
             if user_name == 'root':
                 pass
-            # unprivileged user
+            # unprivileged user, uses su and root password
             elif data_group[18]:
                 list_dest_vars.append(str_bec_su)
-                list_dest_vars.append(gen_pass_tag('root',
+                list_dest_vars.append(gen_pass_tag(data_group[13],
                                                    'ansible_become',
                                                    current_group,
                                                    ''))
