@@ -736,11 +736,16 @@ def convert_csv_to_ini(file_src):
         # sort by first number in natural order
         list_vmh.sort(key=lambda x: '{0:0>8}'.format(x.rsplit(',')[0]).lower())
         # add each line
-        file_vmh = path_vmh_immutable + '/' + current_group + '.csv'
-        file_vmh_open = open(file_vmh, 'a')
-        for q in list_vmh:
-            file_vmh_open.write(q + '\n')
-        file_vmh_open.close()
+        path_file_vmh = path_vmh_immutable + '/' + current_group + '.csv'
+        # give correct permissions
+        os.umask(0)
+        with open(os.open(path_file_vmh, os.O_CREAT | os.O_WRONLY, 0o600),
+                  'w') as file_vmh:
+            # add localhost
+            for q in list_vmh:
+                file_vmh.write(q + '\n')
+        # close file
+        file_vmh.close()
 
 
 def main():
