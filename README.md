@@ -1,5 +1,8 @@
 # inventorymaker
-Automatically generate Ansible inventory file from CSV's.
+
+Manage your entire SSOT, in human read/writable, CSV files  
+Automatically generates Ansible inventory file.  
+Automatically generates vmh environment file.  
 
 Tested on Debian 11
 
