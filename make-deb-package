@@ -15,13 +15,17 @@ VERSION="$VERSION_MAJOR.$VERSION_MINOR_NEW"
 
 # variables
 NAME="inventorymaker"
+README="README.md"
 RELEASES="releases"
 TARGET="DEBIAN"
+MAN_PAGE=1
+FILE_MAN="$NAME.$MAN_PAGE"
 PATH_BASE="./$RELEASES/$NAME-$VERSION"
 PATH_INSTALL="$PATH_BASE/usr/local"
 PATH_BIN="$PATH_INSTALL/bin"
 PATH_SHARE="$PATH_INSTALL/share/$NAME"
 PATH_TARGET="$PATH_BASE/$TARGET"
+PATH_MAN="$PATH_INSTALL/share/man/man$MAN_PAGE"
 
 # delete the old build
 echo "Cleaning up old build"
@@ -29,11 +33,16 @@ rm -rf "$PATH_BASE"
 
 # copy relevant files from source to release
 echo "Copying relevant source files"
-mkdir -p "$PATH_SHARE"
-cp -t "$PATH_SHARE" "README.md" "copyright" || exit 1
+mkdir -p "$PATH_SHARE" "$PATH_MAN"
+cp -t "$PATH_SHARE" "$README" "copyright" || exit 1
 mkdir -p "$PATH_BIN"
 chmod 0755 "inventorymaker" "inventorymaker-init"
 cp -t "$PATH_BIN" "inventorymaker" "inventorymaker-init" || exit 1
+
+# build man page
+ronn -r <"$README" | gzip -9n >"$PATH_MAN/$FILE_MAN" || exit 1
+# get description
+DESCRIPTION=$(sed -n -e '1 s/^.*) -- //p' <"$README") || exit 1
 
 # create Debian control file
 echo "Creating CONTROL file"
@@ -48,7 +57,7 @@ Depends: python3 (>= 3.0),
  dictionaries-common,
  randmac
 Maintainer: Bodo Endres <dev@muspekaren.se>
-Description: Automatically generate Ansible inventory file from CSV.
+Description: $DESCRIPTION
 " >"$PATH_TARGET/control"
 
 # build

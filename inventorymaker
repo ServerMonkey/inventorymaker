@@ -1,13 +1,8 @@
 #!/usr/bin/env python3
 # coding=utf-8
-# PYTHON_ARGCOMPLETE_OK
 
 # PARSER LIBRARIES ############################################################
 
-# todo
-# import argparse
-# import argcomplete
-# import configparser
 import os
 import sys
 import subprocess
@@ -16,13 +11,14 @@ import random
 from faker import Faker
 import hashlib
 
-# NEVER RUN AS ROOT ###########################################################
-
-# todo: add -h --help args
+# PARAMETERS ##################################################################
 
 # args
 gen_template = False
-if str(sys.argv[1]) == 'template':
+if str(sys.argv[1]) == '-h' or str(sys.argv[1]) == '--help':
+    subprocess.run(["man", "inventorymaker.1"])
+    exit(0)
+elif str(sys.argv[1]) == 'template':
     gen_template = True
 else:
     dir_src = ''
@@ -70,12 +66,8 @@ else:
 
 exit_early = False
 
-# todo
-# PARSER INIT #################################################################
-
-# LIBRARIES ###################################################################
-
 # STATIC VARIABLES ############################################################
+
 path_home = os.path.expanduser("~")
 path_im = path_home + '/.inventorymaker'
 file_hash_cache = path_im + '/md5.cache'
@@ -152,7 +144,7 @@ dict_header_categories_help = {
     'IPMI_USER': 'IPMI user account login name',
     'LOCATION': 'Physical location like \'Office\' \'RACK03\' \'49.7:-88.6\'',
     'MAC': 'MAC adress- example: ea:57:b7:16:a1:75',
-    'ORDER': 'VMH deployment order',
+    'ORDER': 'vmh deployment order, this marks the host as a VM',
     'OS': 'Name of the virtual image source file or name of the OS',
     'PASSWORD': 'Superuser password- Be mindful of BECOME_METHOD',
     'PORT': 'SSH port number',
@@ -683,6 +675,11 @@ def parse_row(row, list_header, curr_group, is_group):
                 debug("  ADD (PLAIN): " + key)
                 list_hostdata.append(key_prefix + key + "=\""
                                      + key_data + "\"")
+            if key_data is None:
+                debug("  ADD (EMPTY): " + key)
+                list_hostdata.append(curr_hostname + ' '
+                                     + key_prefix + key + "=\""
+                                     + "\"")
             else:
                 list_hostdata.append(curr_hostname + ' '
                                      + key_prefix + key + "=\""
