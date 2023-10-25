@@ -7,9 +7,15 @@ import os
 import sys
 import subprocess
 import csv
-import random
-from faker import Faker
 import hashlib
+
+try:
+    from faker import Faker
+    import random
+
+    allow_script_parser = True
+except ImportError:
+    allow_script_parser = False
 
 # PARAMETERS ##################################################################
 
@@ -69,8 +75,7 @@ exit_early = False
 # STATIC VARIABLES ############################################################
 
 path_home = os.path.expanduser("~")
-path_im = path_home + '/.inventorymaker'
-file_hash_cache = path_im + '/md5.cache'
+file_hash_cache = file_dest + '.md5.cache'
 file_dest_json = file_dest.replace('.ini', '.json')
 dict_pass_cache = {}
 
@@ -175,7 +180,8 @@ if os.path.isfile(file_cfg_vmh):
         print("Failed to load PATH_ENVIRONMENTS from " + file_cfg_vmh)
         exit(1)
 else:
-    print('Skipping vmh, not installed')
+    pass
+    # print('Skipping vmh, not installed')
 
 
 # FUNCTIONS ###################################################################
@@ -233,46 +239,85 @@ def hash_verify(file):
 
 
 def check_for_new_inventory():
-    # read in old md5 cache
-    with open(file_hash_cache, "r") as file_in:
-        full_hash_old = file_in.read()
-
     # iterate over files in that directory
     files_group = os.listdir(dir_src)
-    full_hash = ''
-    for filename in files_group:
-        f = os.path.join(dir_src, filename)
-        # checking if it is a file
-        if os.path.isfile(f) and f.endswith('.csv'):
-            full_hash = full_hash + hash_make(f)
 
-    # exit if caches are the same
-    if full_hash_old == full_hash:
-        exit(0)
+    # if source inventory is empty
+    if not files_group:
+        # if destionation inventory is already created, skip
+        if os.path.isfile(file_dest):
+            exit(0)
+        else:
+            print("Generating localhost only inventory...")
+            add_localhost_to_inventory()
+            exit(0)
+    # hash all CSV files
+    else:
+        # create empty cache file
+        if not os.path.isfile(file_dest) or not os.path.isfile(
+                file_hash_cache):
+            try:
+                with open(file_hash_cache, 'w') as f:
+                    f.write('')
+            except FileNotFoundError:
+                pass
 
-    # create new cache
-    with open(file_hash_cache, "w") as file_out:
-        file_out.write(full_hash)
+        # read in old md5 cache
+        with open(file_hash_cache, "r") as file_in:
+            full_hash_old = file_in.read()
+
+        full_hash = ''
+        for filename in files_group:
+            f = os.path.join(dir_src, filename)
+            # checking if it is a file
+            if os.path.isfile(f) and f.endswith('.csv'):
+                full_hash = full_hash + hash_make(f)
+
+        # exit if caches are the same
+        if full_hash_old == full_hash:
+            exit(0)
+
+        # create new cache
+        with open(file_hash_cache, "w") as file_out:
+            file_out.write(full_hash)
 
 
-def iterate_over_input_dir():
+def add_localhost_to_inventory():
     # give correct permissions
     os.umask(0)
+    current_user = os.getlogin()
     with open(os.open(file_dest, os.O_CREAT | os.O_WRONLY, 0o600),
               'w') as file_inventory:
         # add localhost
         file_inventory.write('[local]\n')
         file_inventory.write('localhost ansible_connection=local\n')
+        file_inventory.write('localhost ansible_user=' + current_user + '\n')
+        file_inventory.write(
+            'localhost ansible_python_interpreter=/usr/bin/python3\n')
         file_inventory.write('\n')
 
-    # iterate over files in that directory
-    files_group = os.listdir(dir_src)
-    files_group.sort()
-    for filename in files_group:
-        f = os.path.join(dir_src, filename)
-        # checking if it is a file
-        if os.path.isfile(f) and f.endswith('.csv'):
-            convert_csv_to_ini(f)
+    # close file
+    file_inventory.close()
+
+
+def iterate_over_input_dir():
+    # add localhost to the top of the inventory
+    add_localhost_to_inventory()
+
+    # give correct permissions
+    os.umask(0)
+    current_user = os.getlogin()
+    with open(os.open(file_dest, os.O_CREAT | os.O_WRONLY, 0o600),
+              'w') as file_inventory:
+
+        # iterate over files in that directory
+        files_group = os.listdir(dir_src)
+        files_group.sort()
+        for filename in files_group:
+            f = os.path.join(dir_src, filename)
+            # checking if it is a file
+            if os.path.isfile(f) and f.endswith('.csv'):
+                convert_csv_to_ini(f)
 
     # close file
     file_inventory.close()
@@ -410,6 +455,9 @@ def error(code, cat, row_nr):
 
 
 def parse_im_script(row):
+    if not allow_script_parser:
+        return row
+
     # HOSTNAME
     if row[0].startswith('*'):
         row[0] = random_hostname()
@@ -832,20 +880,6 @@ def main():
         print("Create template")
         create_template_file()
     else:
-
-        # create config path
-        if not os.path.isdir(path_im):
-            os.makedirs(path_im)
-
-        # cleanup hash if there is no destination inventory
-        if not os.path.isfile(file_dest) or not os.path.isfile(
-                file_hash_cache):
-            try:
-                with open(file_hash_cache, 'w') as f:
-                    f.write('')
-            except FileNotFoundError:
-                pass
-
         check_for_new_inventory()
 
         # delete old inventory file
