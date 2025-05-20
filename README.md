@@ -3,19 +3,16 @@
 Handle your complete Single Source of Truth (SSOT) using CSV files that are
 both readable and writable by humans.
 
-Tested on Debian 11
-
 ## FEATURES
 
 * Generates Ansible inventory file
-* Generates vmh environment file
 * Uses 'pass' to manage
   passwords: [www.passwordstore.org](https://www.passwordstore.org/)
 
 ## SETUP
 
-Inventorymaker uses the tool 'pass' to get passwords for the Ansible inventory
-file. The 'pass' program requires a working GPG setup.
+Inventorymaker uses the 'pass' CLI tool to get passwords for the Ansible
+inventory file. The 'pass' program requires a working GPG setup.
 
 Typical setup:
 
@@ -40,7 +37,9 @@ Manual: [wiki.archlinux.org/title/GnuPG](https://wiki.archlinux.org/title/GnuPG)
 
 `inventorymaker -h, --help`
 
-`inventorymaker <FOLDER_WITH_CSVS | template> <OUTPUT_FILE>`
+`inventorymaker <FOLDER_WITH_CSVS | template> <OUTPUT_FILE> [OPTIONS]`
+
+`Options can be: 'o' (force overwrite OUTPUT_FILE) and/or 'd' (debug)`
 
 Inventorymaker will parse the CSVs and apply custom parsing rules that will
 result in a directly usable Ansible inventory file. Do not edit the final
@@ -53,7 +52,8 @@ Ansible inventory file manually. During conversion the following things happen:
   for your GPG password. For automated servers it is recommended to set the GPG
   password to an empty string.
 * Due to speed considerations, passwords will be stored in plain text in the
-  output Ansible inventory file (attributes are set to 600).
+  output Ansible inventory file (file attribute will be set to 600, only
+  readable by the current user).
 * Will automatically add 'local' and 'localhost' to the inventory file.
 
 ## CSV FORMAT
@@ -62,7 +62,7 @@ Ansible inventory file manually. During conversion the following things happen:
 * Each CSV file in that folder represents a group of hosts.
 * The CSV file must use commas as separators.
 * Filenames must end in .csv
-* The first line always contains the Ansible variable names.
+* The first line always contains the (Ansible) variable names.
 * The second line always contains group values for all hosts below.
 * All following lines contain individual host values.
 * Individual host values will override group values but try to avoid using
@@ -75,7 +75,7 @@ Variables in the CSV file are not exactly the same as Ansible variables. They
 are simplified by removing the prefix 'ansible_'. Meaning the variable
 'HOSTNAME' will result in the output variable 'ansible_hostname'.
 
-* The minimum required variables are: HOSTNAME and USER or CHILD
+* The minimum required variables are: HOSTNAME and, USER or CHILD
 * The CHILD variable can be used instead of HOSTNAME, to group host together.
   This can simply point to another CSV file in the same directory. Just use the
   name of the file without the .csv extension. For example node1.csv node2.csv
@@ -97,81 +97,95 @@ are simplified by removing the prefix 'ansible_'. Meaning the variable
 * Recommended to only use static variables that don't change during the
   lifetime of a host. Otherwise, it is better to define variables in a
   playbook.
+* Subsequent occurrences of the same variable, for example MAC, NET or CD,
+  shuld be named with an underscore and a number like this:  
+  CD,CD_2,CD_3 ... or NET,NET_2 ...  
+  Don't call them CD1, CD2, or CD_1. The first occurrence of the variable shall
+  not contain an underscore or a number.
 
-| IM VARIABLE        | ANSIBLE VARIABLE           |
-|--------------------|----------------------------|
-| BECOME             | ansible_become             |
-| BECOME_METHOD      | ansible_become_method      |
-| BECOME_PASSWORD    | ansible_become_password    |
-| CHILD              | tag_child                  |
-| DESCRIPTION        | im_description             |
-| DNS                | im_dns                     |
-| FACTORY_HOST       | im_factory_host            |
-| FACTORY_PASSWORD   | im_factory_password        |
-| FACTORY_USER       | im_factory_user            |
-| HARDWARE           | im_hardware                |
-| HOST               | ansible_host               |
-| HOSTNAME           | ansible_hostname           |
-| HPILO_HOST         | im_hpilo_host              |
-| HPILO_PASSWORD     | im_hpilo_password          |
-| HPILO_USER         | im_hpilo_user              |
-| IPMI_HOST          | im_ipmi_host               |
-| IPMI_PASSWORD      | im_ipmi_password           |
-| IPMI_USER          | im_ipmi_user               |
-| LOCATION           | im_location                |
-| MAC                | im_mac                     |
-| ORDER              | im_order                   |
-| OS                 | im_os                      |
-| PASSWORD           | ansible_password           |
-| PORT               | ansible_port               |
-| PYTHON_INTERPRETER | ansible_python_interpreter |
-| STATE              | im_state                   |
-| USER               | ansible_user               |
+Variables:
 
-## VALUES
+| IM VARIABLE        | ANSIBLE VARIABLE           | WILL BE PARSED |
+|--------------------|----------------------------|----------------|
+| BECOME             | ansible_become             | Yes            |
+| BECOME_METHOD      | ansible_become_method      | Yes            |
+| BECOME_PASSWORD    | ansible_become_password    | Yes            |
+| CD                 | im_cd                      |                |
+| CHILD              | tag_child                  | Yes            |
+| CPU                | im_cpu                     |                |
+| DESCRIPTION        | im_description             |                |
+| DISK_SIZE          | im_disk_size               |                |
+| DISK_TYPE          | im_disk_type               |                |
+| DNS                | im_dns                     |                |
+| FACTORY_HOST       | im_factory_host            |                |
+| FACTORY_PASSWORD   | im_factory_password        | Yes            |
+| FACTORY_USER       | im_factory_user            | Yes            |
+| HARDWARE           | im_hardware                |                |
+| HOST               | ansible_host               | Yes            |
+| HOSTNAME           | ansible_hostname           | Yes            |
+| HPILO_HOST         | im_hpilo_host              |                |
+| HPILO_PASSWORD     | im_hpilo_password          | Yes            |
+| HPILO_USER         | im_hpilo_user              | Yes            |
+| IPMI_HOST          | im_ipmi_host               |                |
+| IPMI_PASSWORD      | im_ipmi_password           | Yes            |
+| IPMI_USER          | im_ipmi_user               | Yes            |
+| LOCATION           | im_location                |                |
+| MAC                | im_mac                     |                |
+| MEM                | im_mem                     |                |
+| NET                | im_net                     |                |
+| ORDER              | im_order                   |                |
+| OS                 | im_os                      |                |
+| PASSWORD           | ansible_password           | Yes            |
+| PORT               | ansible_port               | Yes            |
+| PYTHON_INTERPRETER | ansible_python_interpreter | Yes            |
+| STATE              | im_state                   | Yes            |
+| USER               | ansible_user               | Yes            |
+
+Variables in the section 'WILL BE PARSED' will be used by inventorymaker to
+customize the Ansible inventory file. The other variables will be included in
+the final Ansible inventory file but will not be manipulated by inventorymaker.
+'WILL BE PARSED' variables are recommended to be used in the CSV file but are
+not mandatory.
 
 To see what each variable's value does it is recommended to generate a template
 and read the comments in that file. See further down under 'EXAMPLE USAGE'.
 
-Because some values are more complicated, they are explained here:
+## VARIABLE VALUES
 
-**For the ORDER variable** : This integer value sets the order in which the
-program vmh creates virtual machines.  
-vmh can be found
-here: [github.com/ServerMonkey/vmh](https://github.com/ServerMonkey/vmh)  
-Settings a value here ultimately marks the host as a VM. Inventorymaker will
-automatically generate a custom vmh environment file. Be mindful that the value
-for OS and HOSTNAME also must be specified. In this case the value of the OS
-variable represents the VM image.
+Some variables and values are more complicated, they are explained here:
 
-It will translate like this:
+**ORDER variable** : This integer value sets the order in which virtual
+machines are supposed to be deployed.  
+This variable can be used by other programs automate VM deployment. For example
+vmh: [github.com/ServerMonkey/vmh](https://github.com/ServerMonkey/vmh)  
+Settings a value here ultimately marks the host as a VM. In that case the 'OS'
+variable should be the name of the VM template (Golden Image) and HOSTNAME
+should be the name of the VM.  
+For example to deploy a VM with the name 'myvm' first and 'myvm2' second, set
+the ORDER variable to 1 for 'myvm' and 2 for 'myvm2'.  
+For parallel deployment set the ORDER variable to the same value.
 
-| IM VARIABLE | VMH VARIABLE  |
-|-------------|---------------|
-| ORDER       | ORDER         |
-| HOSTNAME    | DOMAIN_NAME   |
-| OS          | DOMAIN_SOURCE |
-
-**For the PASSWORD and USER variable** : If this value is set to 'LOCAL'
+**PASSWORD and USER variable** : If this value is set to 'LOCAL'
 inventorymaker will assume that this is a physical-access-only system, that can
 be reached only via a physical terminal. This host will be excluded from the
-exported Ansible inventory file.
+exported Ansible inventory file. This is useful if you want to manage hosts in
+your source inventory but not in Ansible.
 
-**For the STATE variable** : The value for the STATE variable is used to
+**STATE variable** : The value for the STATE variable is used to
 determine the systems state of a host. It is up to your playbooks to handle the
 different states. Recommend using the purposes from the list below. When using
 DOWN and EXC, the host will automatically be excluded from the exported Ansible
-inventory file. This is nice if you want to manage hosts in your source
+inventory file. This is useful if you want to manage hosts in your source
 inventory but not in Ansible.
 
 | VALUE   | PURPOSE                                              |
 |---------|------------------------------------------------------|
-| UP      | host is supposed to always be online / booted       |
+| UP      | host is supposed to always be online / booted        |
 | DOWN    | permanently offline, will be excluded from inventory |
 | MAN     | manual, either booted or offline                     |
 | MAINT   | maintenance, under repair or broken                  |
 | EXC     | exclude, will be excluded from inventory             |
-| LIQ     | liquidate, is supposed to be removed soon           |
+| LIQ     | liquidate, is supposed to be removed soon            |
 | UNKNOWN | unknown state, existing but unknown host             |
 
 **`$USER` value** : This value will be replaced with the current users Posix
@@ -216,7 +230,7 @@ If you don't want to use plain-text passwords in your Ansible inventory you can
 ommit pass and let Ansible handle passwords like this instead:
 ```"{{ lookup('passwordstore', 'ansible/myusername', errors='strict')}}"```
 Be aware that when you have hundrets of passwords this will significantly slow
-down your plays. Or use vaults.
+down your plays. Or use Ansible vaults.
 
 ## EXAMPLE USAGE
 
@@ -227,8 +241,9 @@ Create a CSV file from the template in that folder:
 
 `$ inventorymaker template homelab.csv`
 
-Now open the CSV file with libreoffice or visidata. Or any other CSV editor of
-you choice.
+Now open the CSV file in any CSV editor that respects the CSVs default format.
+For example LibreOffice Calc, VisiData (CLI) or the 'CSV Editor' plugin for
+your IDE, by Martin Sommer. There are many more.
 
 * Add your hosts to the CSV file under 'HOSTNAME', remember to skip the second
   row because it is used for group values.

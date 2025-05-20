@@ -21,7 +21,9 @@ except ImportError:
 
 # args
 gen_template = False
-if str(sys.argv[1]) == '-h' or str(sys.argv[1]) == '--help':
+if len(sys.argv) == 1 or \
+        str(sys.argv[1]) == '-h' or \
+        str(sys.argv[1]) == '--help':
     subprocess.run(["man", "inventorymaker.1"])
     exit(0)
 elif str(sys.argv[1]) == 'template':
@@ -58,7 +60,7 @@ try:
     parameters = str(sys.argv[3])
 except IndexError:
     pass
-if 'r' in parameters:
+if 'o' in parameters:
     # delete old inventory file
     try:
         os.remove(file_dest)
@@ -103,24 +105,14 @@ dict_header_categories = {
     'BECOME_METHOD': 'ansible_become_method',
     'BECOME_PASSWORD': 'ansible_become_password',
     'CHILD': 'tag_child',
-    'DESCRIPTION': 'im_description',
-    'DNS': 'im_dns',
-    'FACTORY_HOST': 'im_factory_host',
     'FACTORY_PASSWORD': 'im_factory_password',
     'FACTORY_USER': 'im_factory_user',
-    'HARDWARE': 'im_hardware',
     'HOST': 'ansible_host',
     'HOSTNAME': 'ansible_hostname',
-    'HPILO_HOST': 'im_hpilo_host',
     'HPILO_PASSWORD': 'im_hpilo_password',
     'HPILO_USER': 'im_hpilo_user',
-    'IPMI_HOST': 'im_ipmi_host',
     'IPMI_PASSWORD': 'im_ipmi_password',
     'IPMI_USER': 'im_ipmi_user',
-    'LOCATION': 'im_location',
-    'MAC': 'im_mac',
-    'ORDER': 'im_order',
-    'OS': 'im_os',
     'PASSWORD': 'ansible_password',
     'PORT': 'ansible_port',
     'PYTHON_INTERPRETER': 'ansible_python_interpreter',
@@ -132,8 +124,12 @@ dict_header_categories_help = {
     'BECOME': 'Can the Superuser become root?- eiter \'true\' or \'false\'',
     'BECOME_METHOD': 'How Superuser becomes root- eiter \'su\' or \'sudo\'',
     'BECOME_PASSWORD': 'Password for BECOME_METHOD',
+    'CD': 'What CD-ROM or DVD to insert or is inserted - Up to CD_4',
     'CHILD': 'Groupname- can be a hostname or inventory file (remove .csv)',
-    'DESCRIPTION': 'Explain the purpouse of this machine- in one sentence',
+    'CPU': 'Number of CPU cores- useful to change core count on VMs',
+    'DESCRIPTION': 'Explain the purpose of this machine- in one sentence',
+    'DISK_SIZE': 'Max disk size in GiB - useful to resize disk on VMs',
+    'DISK_TYPE': 'Disk hardware like NVME SSD... on VMs use CLONE or CHAIN',
     'DNS': 'Override default DNS server',
     'FACTORY_HOST': 'Original HOSTNAME that should be changed',
     'FACTORY_PASSWORD': 'Original PASSWORD that should be changed',
@@ -147,9 +143,11 @@ dict_header_categories_help = {
     'IPMI_HOST': 'IMPI HOSTNAME',
     'IPMI_PASSWORD': 'IPMI password',
     'IPMI_USER': 'IPMI user account login name',
-    'LOCATION': 'Physical location like \'Office\' \'RACK03\' \'49.7:-88.6\'',
-    'MAC': 'MAC adress- example: ea:57:b7:16:a1:75',
-    'ORDER': 'vmh deployment order, this marks the host as a VM',
+    'LOCATION': 'Physical location E.g. Office RACK03 basement10-23',
+    'MAC': 'MAC adress- E.g. ea:57:b7:16:a1:75 match with NET - Up to MAC_10',
+    'MEM': 'Memory in GiB - useful to resize memory on VMs',
+    'NET': 'Network name- E.g. office home LAN WAN DMZ - Up to NET_10',
+    'ORDER': 'deployment order - useful to mark the host as a VM',
     'OS': 'Name of the virtual image source file or name of the OS',
     'PASSWORD': 'Superuser password- Be mindful of BECOME_METHOD',
     'PORT': 'SSH port number',
@@ -164,24 +162,6 @@ legacy = [
     'IP',
     'FACTORY_IP'
 ]
-
-# LOAD CFG ####################################################################
-
-file_cfg_vmh = '/etc/vmh.conf'
-path_vmh_env = ''
-if os.path.isfile(file_cfg_vmh):
-    with open(file_cfg_vmh, "r") as cfg:
-        for line in cfg:
-            # get path to vmh immutable folder
-            if line.startswith('PATH_ENVIRONMENTS='):
-                path_vmh_env = line.rsplit('=')[1].rstrip('\n')
-
-    if path_vmh_env != '' and not os.path.isdir(path_vmh_env):
-        print("Failed to load PATH_ENVIRONMENTS from " + file_cfg_vmh)
-        exit(1)
-else:
-    pass
-    # print('Skipping vmh, not installed')
 
 
 # FUNCTIONS ###################################################################
@@ -207,7 +187,7 @@ def exit_fail(text):
 def create_template_file():
     header_data = ''
     sample_data = ''
-    for header_key in dict_header_categories:
+    for header_key in dict_header_categories_help:
         header_data = header_data + header_key + ','
         sample_data = sample_data + "# " + \
                       dict_header_categories_help.get(header_key) + ','
@@ -554,12 +534,9 @@ def get_password(pass_path):
 
 
 def parse_row(row, list_header, curr_group, is_group):
-    debug(row)
-
     # create dest inventory database
     list_hostdata = []
     list_children = []
-    list_vmh = []
     dict_data = {}
 
     # translate header to ansible variables
@@ -567,6 +544,7 @@ def parse_row(row, list_header, curr_group, is_group):
     if not row:
         exit_fail('row is empty')
 
+    # iterate over each header cell
     for key in list_header:
         data = row[count_cat]
         if data and not data.startswith('#'):
@@ -609,6 +587,7 @@ def parse_row(row, list_header, curr_group, is_group):
 
     # parse script
     dict_data_tmp = dict_data.copy()
+
     for key in dict_data_tmp:
         key_data = dict_data_tmp.get(key)
 
@@ -629,12 +608,6 @@ def parse_row(row, list_header, curr_group, is_group):
         elif key == 'ansible_user' and key_data == 'LOCAL':
             debug("  SKIP LOCAL: " + key)
             return False
-
-        # vmh
-        if key == 'im_order' and 'im_os' in dict_data:
-            list_vmh.append(dict_data.get('im_order') + ','
-                            + curr_hostname + ','
-                            + dict_data.get('im_os'))
 
         # find passwords
         if key_data == 'PASS':
@@ -733,12 +706,55 @@ def parse_row(row, list_header, curr_group, is_group):
                                      + key_prefix + key + "=\""
                                      + key_data + "\"")
 
-    return list_hostdata, list_children, list_vmh
+    return list_hostdata, list_children
+
+
+# Function to filter the rows based on the conditions
+def remove_exclude_hosts(csv_data):
+    list_header = csv_data[0]
+    list_groups = csv_data[1]
+    list_hosts = csv_data[2]
+    filtered_hosts = []
+
+    # Get the index of the 'STATE' column
+    state_idx = list_header.index('STATE')
+
+    # Check if the group state is in the skip list
+    group_state = list_groups[state_idx]
+    group_state_skip = group_state in list_system_states_skip
+
+    # Iterate through hosts and apply the filter
+    for host in list_hosts:
+        host_state = host[state_idx]
+
+        # Skip host if its state is in the skip list
+        if host_state in list_system_states_skip:
+            debug("SKIP HOST : " + str(host[0]))
+            continue
+
+        # Skip host if the group state is in the skip list and
+        # the host state is empty
+        if group_state_skip and host_state == '':
+            debug("SKIP GROUP: " + str(host[0]))
+            continue
+
+        # Otherwise, keep the host
+        filtered_hosts.append(host)
+
+    # Return the final data
+    return [list_header, list_groups, filtered_hosts]
 
 
 def convert_csv_to_ini(file_src):
+    debug("### FILE: " + file_src)
+
     # source data
     csv_data = csv_to_list(file_src)
+
+    # filter out hosts to be ignored
+    if 'STATE' in csv_data[0]:
+        csv_data = remove_exclude_hosts(csv_data)
+
     list_header = csv_data[0]
     list_groups = csv_data[1]
     list_hosts = csv_data[2]
@@ -746,7 +762,6 @@ def convert_csv_to_ini(file_src):
     list_hostdata = []
     list_vars = []
     list_children = []
-    list_vmh = []
 
     # more variables
     # todo
@@ -762,9 +777,13 @@ def convert_csv_to_ini(file_src):
     # get group
     curr_group = os.path.basename(file_src).replace('.csv', '')
 
+    # if the header has the cell STATE,
+    # exclude all the rows from the list_hosts dictionary,
+    # except if the current rows STATE is not in list_system_states_skip
+    # Check if 'STATE' is in the header
+    # todo: this above!
+
     # iterate over each entire row/cell
-    debug("### FILE: " + file_src)
-    #
     row_counter = 2
     for row in list_hosts:
         row_counter = row_counter + 1
@@ -773,7 +792,6 @@ def convert_csv_to_ini(file_src):
         if list_row_result:
             list_hostdata = list_hostdata + list_row_result[0]
             list_children = list_children + list_row_result[1]
-            list_vmh = list_vmh + list_row_result[2]
         else:
             debug("SKIP: " + str(row[0]))
     # vars
@@ -817,63 +835,6 @@ def convert_csv_to_ini(file_src):
         debug("### RESULT:")
         os.system("cat " + file_dest)
 
-    # # AUTH and USER
-    # if data[13] or data[18]:
-    #     # always add
-    #     # list_dest.append(data[0] + ' ' + str_python)  #todo
-    #     # use unprivileged user instead
-    #     if data[18]:
-    #         user_name = data[18]
-    #     else:
-    #         user_name = data[13]
-    #     # add user
-    #     list_dest.append(
-    #         data[0] + ' ansible_user=' + os.path.basename(user_name))
-    #     list_dest.append(gen_pass_tag(user_name,
-    #                                   'ansible',
-    #                                   curr_group,
-    #                                   data[0]))
-    #     # root does not need become
-    #     if user_name == 'root':
-    #         pass
-    #     # force disable become for USER if AUTH is "FALSE"
-    #     elif data[13] == 'FALSE':
-    #         list_dest.append(data[0] + ' ' + str_bec_false)
-    #     # unprivileged user, uses su and root password
-    #     elif data[18]:
-    #         list_dest.append(data[0] + ' ' + str_bec_su)
-    #         list_dest.append(gen_pass_tag(data_group[13],
-    #                                       'ansible_become',
-    #                                       curr_group,
-    #                                       data[0]))
-    #     # user with sudo
-    #     elif data[13]:
-    #         list_dest.append(data[0] + ' ' + str_bec_sudo)
-    #         # become pass is required even if it is the same as user
-    #         list_dest.append(gen_pass_tag(user_name,
-    #                                       'ansible_become',
-    #                                       curr_group,
-    #                                       data[0]))
-
-    # write vmh environment file
-    # if list_vmh is not empty
-    if bool(list_vmh) and path_vmh_env:
-        print("Generating vmh environment '" + curr_group + "' ...")
-        # sort by first number in natural order
-        list_vmh.sort(key=lambda x: '{0:0>8}'.format(x.rsplit(',')[0]).lower())
-        # add each line
-        path_file_vmh = path_vmh_env + '/' + curr_group + '.csv'
-        debug('path_file_vmh: ' + path_file_vmh)
-        # give correct permissions
-        os.umask(0)
-        with open(os.open(path_file_vmh, os.O_CREAT | os.O_WRONLY, 0o600),
-                  'w') as file_vmh:
-            # add localhost
-            for q in list_vmh:
-                file_vmh.write(q + '\n')
-        # close file
-        file_vmh.close()
-
 
 def main():
     if gen_template:
@@ -887,13 +848,6 @@ def main():
             os.remove(file_dest)
         except FileNotFoundError:
             pass
-
-        # delete old vmh environments
-        if path_vmh_env:
-            files_vmh_env = os.listdir(path_vmh_env)
-            for file in files_vmh_env:
-                if file.endswith(".csv"):
-                    os.remove(os.path.join(path_vmh_env, file))
 
         # generate new inventory
         if 'r' in parameters:
